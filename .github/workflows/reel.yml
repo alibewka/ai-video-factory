@@ -7,10 +7,10 @@ on:
         description: "Только собрать видео, ничего не публиковать"
         type: boolean
         default: true
-  # Расписание включим после успешного тестового прогона (раскомментировать две строки ниже).
-  # Время в UTC: 13:00 UTC = 18:00 по Алматы.
-  # schedule:
-  #   - cron: "0 13 * * *"
+  # Каждый день в 13:00 UTC (18:00 по Алматы). Если в очереди нет ролика со статусом pending,
+  # ничего не происходит. Если есть, публикация стартует только после твоей кнопки Approve.
+  schedule:
+    - cron: "0 13 * * *"
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       run: ${{ steps.s.outputs.run }}
       publish: ${{ steps.s.outputs.publish }}
@@ -43,7 +43,7 @@ jobs:
   render:
     needs: plan
     if: needs.plan.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
   publish:
     needs: [plan, render]
     if: needs.plan.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Окружение с обязательным подтверждением: job стартует только после твоей кнопки Approve.
     environment: instagram-publish
