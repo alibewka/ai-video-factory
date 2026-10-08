@@ -317,11 +317,16 @@ class RefreshTests(unittest.TestCase):
 
 class EpisodeTests(unittest.TestCase):
     def test_defaults(self) -> None:
-        self.assertEqual(ci_state.episode({"status": "pending"}), ("Password", "content/caption.txt"))
+        self.assertEqual(ci_state.episode({"status": "pending"}), ("Password", "content/caption.txt", ""))
 
     def test_custom_episode(self) -> None:
         state = {"composition": "Ep02-Phishing", "caption": "content/episodes/ep02/caption.txt"}
-        self.assertEqual(ci_state.episode(state), ("Ep02-Phishing", "content/episodes/ep02/caption.txt"))
+        self.assertEqual(ci_state.episode(state), ("Ep02-Phishing", "content/episodes/ep02/caption.txt", ""))
+
+    def test_prerendered_video(self) -> None:
+        state = {"video": "content/videos/pentest.mp4", "caption": "content/captions/pentest.txt"}
+        self.assertEqual(ci_state.episode(state),
+                         ("Password", "content/captions/pentest.txt", "content/videos/pentest.mp4"))
 
     def test_rejects_unsafe_values(self) -> None:
         bad_states = [
@@ -331,6 +336,10 @@ class EpisodeTests(unittest.TestCase):
             {"caption": "/etc/passwd"},
             {"caption": "content/a.txt; id"},
             {"caption": "content/../x.txt"},
+            {"video": "../x.mp4"},
+            {"video": "/tmp/x.mp4"},
+            {"video": "content/a.mov"},
+            {"video": "content/a.mp4; id"},
         ]
         for bad in bad_states:
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
@@ -341,13 +350,15 @@ class EpisodeTests(unittest.TestCase):
             state = Path(tmp) / "next.json"
             output = Path(tmp) / "github_output"
             state.write_text(json.dumps({"status": "pending", "composition": "Ep02",
-                                         "caption": "content/ep02.txt"}), encoding="utf-8")
+                                         "caption": "content/ep02.txt",
+                                         "video": "content/videos/ep02.mp4"}), encoding="utf-8")
             with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 ci_state.plan("schedule", "", state)
             lines = output.read_text(encoding="utf-8").splitlines()
         self.assertIn("composition=Ep02", lines)
         self.assertIn("caption=content/ep02.txt", lines)
+        self.assertIn("video=content/videos/ep02.mp4", lines)
         self.assertIn("publish=true", lines)
 
 

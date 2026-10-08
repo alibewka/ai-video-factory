@@ -21,6 +21,7 @@ DEFAULT_COMPOSITION = "Password"
 DEFAULT_CAPTION = "content/caption.txt"
 SAFE_COMPOSITION = re.compile(r"^[A-Za-z0-9_-]+$")
 SAFE_CAPTION = re.compile(r"^content/[A-Za-z0-9_./-]+\.txt$")
+SAFE_VIDEO = re.compile(r"^content/[A-Za-z0-9_./-]+\.mp4$")
 
 
 def emit(key: str, value: object) -> None:
@@ -36,18 +37,23 @@ def read_state(path: Path = STATE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def episode(state: dict) -> tuple[str, str]:
-    """Какую композицию Remotion рендерить и откуда брать описание.
+def episode(state: dict) -> tuple[str, str, str]:
+    """Какую композицию Remotion рендерить, откуда брать описание и есть ли готовое видео.
+
+    Если задано поле video, Remotion не запускается: публикуется готовый mp4 из репозитория.
 
     Значения попадают в команды workflow, поэтому проверяются строго.
     """
     composition = state.get("composition", DEFAULT_COMPOSITION)
     caption = state.get("caption", DEFAULT_CAPTION)
+    video = state.get("video", "")
     if not isinstance(composition, str) or not SAFE_COMPOSITION.match(composition):
         sys.exit(f"content/next.json: недопустимое имя композиции: {composition!r}")
     if not isinstance(caption, str) or not SAFE_CAPTION.match(caption) or ".." in caption:
         sys.exit(f"content/next.json: описание должно лежать в content/ и быть файлом .txt: {caption!r}")
-    return composition, caption
+    if not isinstance(video, str) or (video and (not SAFE_VIDEO.match(video) or ".." in video)):
+        sys.exit(f"content/next.json: готовое видео должно лежать в content/ и быть файлом .mp4: {video!r}")
+    return composition, caption, video
 
 
 def plan(event: str, dry_run: str, state_path: Path = STATE) -> tuple[bool, bool]:
@@ -59,11 +65,12 @@ def plan(event: str, dry_run: str, state_path: Path = STATE) -> tuple[bool, bool
         run, publish = pending, pending
     if not run:
         print(f"::notice::В очереди нет ролика со статусом pending (сейчас: {state.get('status')}). Ничего не делаю.")
-    composition, caption = episode(state) if run else (DEFAULT_COMPOSITION, DEFAULT_CAPTION)
+    composition, caption, video = episode(state) if run else (DEFAULT_COMPOSITION, DEFAULT_CAPTION, "")
     emit("run", run)
     emit("publish", publish)
     emit("composition", composition)
     emit("caption", caption)
+    emit("video", video)
     return run, publish
 
 

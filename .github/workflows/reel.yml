@@ -27,6 +27,7 @@ jobs:
       publish: ${{ steps.s.outputs.publish }}
       composition: ${{ steps.s.outputs.composition }}
       caption: ${{ steps.s.outputs.caption }}
+      video: ${{ steps.s.outputs.video }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,6 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        if: needs.plan.outputs.video == ''
         with:
           node-version: 22
           cache: npm
@@ -57,7 +59,16 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: npm ci
+        if: needs.plan.outputs.video == ''
+      - name: Взять готовое видео из репозитория
+        if: needs.plan.outputs.video != ''
+        env:
+          VIDEO: ${{ needs.plan.outputs.video }}
+        run: |
+          mkdir -p out
+          cp "$VIDEO" out/reel.mp4
       - name: Рендер видео (Remotion)
+        if: needs.plan.outputs.video == ''
         env:
           COMPOSITION: ${{ needs.plan.outputs.composition }}
         run: npx remotion render src/index.ts "$COMPOSITION" out/reel.mp4 --codec=h264 --log=warn

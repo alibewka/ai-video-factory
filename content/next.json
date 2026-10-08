@@ -1,7 +1,6 @@
 {
-  "id": "wifi-explainer-v3",
-  "status": "posted",
-  "composition": "Password",
-  "caption": "content/caption.txt",
-  "permalink": "https://www.instagram.com/reel/DeKGLA-CGSl/"
+  "id": "pentest-ethical-hacker",
+  "status": "pending",
+  "video": "content/videos/pentest.mp4",
+  "caption": "content/captions/pentest.txt"
 }
