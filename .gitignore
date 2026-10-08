@@ -7,4 +7,4 @@ queue
 *.bak*
 __pycache__
 /*.mp4
-caption.txt
+/caption.txt

@@ -1,0 +1,113 @@
+name: Reel — собрать и опубликовать
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Только собрать видео, ничего не публиковать"
+        type: boolean
+        default: true
+  # Расписание включим после успешного тестового прогона (раскомментировать две строки ниже).
+  # Время в UTC: 13:00 UTC = 18:00 по Алматы.
+  # schedule:
+  #   - cron: "0 13 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reel
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.s.outputs.run }}
+      publish: ${{ steps.s.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Тесты
+        run: python -m unittest discover -s tests -v
+      - id: s
+        name: Что запускать
+        run: python tools/ci_state.py plan "${{ github.event_name }}" "${{ inputs.dry_run }}"
+
+  render:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: npm ci
+      - name: Рендер видео (Remotion)
+        run: npx remotion render src/index.ts Password out/reel.mp4 --codec=h264 --log=warn
+      - name: Проверка видео
+        run: python tools/ci_state.py verify out/reel.mp4
+      - name: Проверка описания (без публикации)
+        env:
+          IG_USER_ID: "0"
+          IG_ACCESS_TOKEN: "dry-run"
+        run: python tools/publish_instagram.py publish --video out/reel.mp4 --caption-file content/caption.txt --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reel
+          path: out/reel.mp4
+          retention-days: 7
+
+  publish:
+    needs: [plan, render]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Окружение с обязательным подтверждением: job стартует только после твоей кнопки Approve.
+    environment: instagram-publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: reel
+          path: out
+      - name: Установка cloudflared (временная публичная ссылка на видео)
+        run: |
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          sudo install -m 0755 cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+      - name: Публикация Reel
+        id: publish
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: |
+          python -u tools/publish_instagram.py check
+          python -u tools/publish_instagram.py publish --video out/reel.mp4 --caption-file content/caption.txt --yes | tee publish.log
+      - name: Отметить ролик опубликованным
+        if: always() && steps.publish.outcome == 'success'
+        run: |
+          python tools/ci_state.py posted publish.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add content/next.json
+          git commit -m "chore: ролик опубликован"
+          git pull --rebase
+          git push

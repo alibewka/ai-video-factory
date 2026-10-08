@@ -22,7 +22,7 @@ function die(msg, code = 1) {
 }
 
 function loadEnv() {
-  if (!fs.existsSync(ENV_PATH)) die('Не найден файл .env: ' + ENV_PATH);
+  if (!fs.existsSync(ENV_PATH)) return; // в CI ключи приходят из окружения (GitHub Secrets)
   for (const line of fs.readFileSync(ENV_PATH, 'utf8').split(/\r?\n/)) {
     if (line.trim().startsWith('#')) continue;
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
