@@ -28,9 +28,11 @@ TOKEN = "SECRET-TOKEN-123"
 class FakeGraph:
     """Поддельный Instagram Graph API: запоминает запросы и отвечает как настоящий."""
 
-    def __init__(self, polls_before_finished: int = 2, auth_error: bool = False) -> None:
+    def __init__(self, polls_before_finished: int = 2, auth_error: bool = False,
+                 refresh_token: str | None = None) -> None:
         self.polls_before_finished = polls_before_finished
         self.auth_error = auth_error
+        self.refresh_token = refresh_token
         self.calls: list[tuple[str, str, dict]] = []
         self.polled = 0
         fake = self
@@ -53,7 +55,8 @@ class FakeGraph:
                 if method == "POST":
                     length = int(self.headers.get("Content-Length") or 0)
                     params.update({k: v[0] for k, v in parse_qs(self.rfile.read(length).decode()).items()})
-                path = url.path.split("/", 2)[2]
+                parts = url.path.split("/", 2)
+                path = parts[2] if len(parts) > 2 else parts[1]
                 fake.calls.append((method, path, params))
                 if fake.auth_error:
                     message = f"Invalid OAuth access token {params.get('access_token')}"
@@ -72,6 +75,9 @@ class FakeGraph:
                     return self.reply(200, {"id": "555"})
                 if (method, path) == ("GET", "555"):
                     return self.reply(200, {"permalink": "https://www.instagram.com/reel/TEST/"})
+                if (method, path) == ("GET", "refresh_access_token"):
+                    token = fake.refresh_token or params.get("access_token")
+                    return self.reply(200, {"access_token": token, "expires_in": 5183944})
                 return self.reply(404, {"error": {"message": "not found", "code": 100}})
 
             def do_GET(self) -> None:
@@ -83,6 +89,10 @@ class FakeGraph:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def root(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_address[1]}"
 
     @property
     def base(self) -> str:
@@ -278,6 +288,67 @@ class QueueStateTests(unittest.TestCase):
             ci_state.verify(small)
         with contextlib.redirect_stdout(io.StringIO()):
             ci_state.verify(good)
+
+
+class RefreshTests(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.no_env = Path(tmp.name) / "missing.env"  # настоящий .env тестами не трогаем
+
+    def refresh(self, fake: FakeGraph) -> tuple[int, str, str]:
+        self.addCleanup(fake.close)
+        with mock.patch.object(ig, "ENV_PATH", self.no_env), \
+                mock.patch.object(ig, "REFRESH_URL", fake.root + "/refresh_access_token"):
+            return run_cli(fake.base, "refresh")
+
+    def test_same_token_is_extended(self) -> None:
+        code, out, err = self.refresh(FakeGraph())
+        self.assertEqual(code, 0)
+        self.assertIn("не изменилось", out)
+        self.assertNotIn(TOKEN, out + err)
+
+    def test_new_token_without_env_fails_and_is_never_printed(self) -> None:
+        code, out, err = self.refresh(FakeGraph(refresh_token="NEW-TOKEN-999"))
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("NEW-TOKEN-999", out + err)
+        self.assertNotIn(TOKEN, out + err)
+
+
+class EpisodeTests(unittest.TestCase):
+    def test_defaults(self) -> None:
+        self.assertEqual(ci_state.episode({"status": "pending"}), ("Password", "content/caption.txt"))
+
+    def test_custom_episode(self) -> None:
+        state = {"composition": "Ep02-Phishing", "caption": "content/episodes/ep02/caption.txt"}
+        self.assertEqual(ci_state.episode(state), ("Ep02-Phishing", "content/episodes/ep02/caption.txt"))
+
+    def test_rejects_unsafe_values(self) -> None:
+        bad_states = [
+            {"composition": "Password; rm -rf /"},
+            {"composition": "$(id)"},
+            {"caption": "../secret.txt"},
+            {"caption": "/etc/passwd"},
+            {"caption": "content/a.txt; id"},
+            {"caption": "content/../x.txt"},
+        ]
+        for bad in bad_states:
+            with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                ci_state.episode(bad)
+
+    def test_plan_exposes_episode_to_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "next.json"
+            output = Path(tmp) / "github_output"
+            state.write_text(json.dumps({"status": "pending", "composition": "Ep02",
+                                         "caption": "content/ep02.txt"}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                ci_state.plan("schedule", "", state)
+            lines = output.read_text(encoding="utf-8").splitlines()
+        self.assertIn("composition=Ep02", lines)
+        self.assertIn("caption=content/ep02.txt", lines)
+        self.assertIn("publish=true", lines)
 
 
 if __name__ == "__main__":

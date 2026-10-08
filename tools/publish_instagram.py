@@ -290,9 +290,12 @@ def cmd_refresh(api: Instagram) -> None:
             re.sub(r"^(\s*IG_ACCESS_TOKEN\s*=).*$", lambda m: m.group(1) + new_token, text, flags=re.M),
             encoding="utf-8")
         print(f"✓ Токен продлён и записан в .env. Действует ещё примерно {days} дн.")
+    elif new_token == api.token:
+        print(f"✓ Токен продлён ещё на ~{days} дн. Значение токена не изменилось, секрет обновлять не нужно.")
     else:
-        print(f"✓ Токен продлён на ~{days} дн., но файла .env нет. Новый токен не печатаю: "
-              "обнови секрет IG_ACCESS_TOKEN вручную.")
+        die("Токен продлён, но получил новое значение, а сохранить его некуда (файла .env нет). "
+            "Новое значение не печатаю, чтобы оно не попало в журнал. "
+            "Старый токен действует до своего срока: выпусти новый в Meta и обнови секрет IG_ACCESS_TOKEN.")
 
 
 def read_caption(args: argparse.Namespace) -> str:

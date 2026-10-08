@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Помощник для GitHub Actions: решает, что запускать, проверяет видео и отмечает ролик опубликованным.
 
-    python tools/ci_state.py plan <event> <dry_run>   # пишет run/publish в GITHUB_OUTPUT
+    python tools/ci_state.py plan <event> <dry_run>   # пишет run/publish/composition/caption в GITHUB_OUTPUT
     python tools/ci_state.py verify <video.mp4>       # проверяет, что файл похож на нормальное видео
     python tools/ci_state.py posted <publish.log>     # ставит status=posted в content/next.json
 """
@@ -17,6 +17,10 @@ from pathlib import Path
 
 STATE = Path("content/next.json")
 MIN_VIDEO_BYTES = 500 * 1024
+DEFAULT_COMPOSITION = "Password"
+DEFAULT_CAPTION = "content/caption.txt"
+SAFE_COMPOSITION = re.compile(r"^[A-Za-z0-9_-]+$")
+SAFE_CAPTION = re.compile(r"^content/[A-Za-z0-9_./-]+\.txt$")
 
 
 def emit(key: str, value: object) -> None:
@@ -32,6 +36,20 @@ def read_state(path: Path = STATE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def episode(state: dict) -> tuple[str, str]:
+    """Какую композицию Remotion рендерить и откуда брать описание.
+
+    Значения попадают в команды workflow, поэтому проверяются строго.
+    """
+    composition = state.get("composition", DEFAULT_COMPOSITION)
+    caption = state.get("caption", DEFAULT_CAPTION)
+    if not isinstance(composition, str) or not SAFE_COMPOSITION.match(composition):
+        sys.exit(f"content/next.json: недопустимое имя композиции: {composition!r}")
+    if not isinstance(caption, str) or not SAFE_CAPTION.match(caption) or ".." in caption:
+        sys.exit(f"content/next.json: описание должно лежать в content/ и быть файлом .txt: {caption!r}")
+    return composition, caption
+
+
 def plan(event: str, dry_run: str, state_path: Path = STATE) -> tuple[bool, bool]:
     state = read_state(state_path)
     pending = state.get("status") == "pending"
@@ -41,8 +59,11 @@ def plan(event: str, dry_run: str, state_path: Path = STATE) -> tuple[bool, bool
         run, publish = pending, pending
     if not run:
         print(f"::notice::В очереди нет ролика со статусом pending (сейчас: {state.get('status')}). Ничего не делаю.")
+    composition, caption = episode(state) if run else (DEFAULT_COMPOSITION, DEFAULT_CAPTION)
     emit("run", run)
     emit("publish", publish)
+    emit("composition", composition)
+    emit("caption", caption)
     return run, publish
 
 

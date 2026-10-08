@@ -25,6 +25,8 @@ jobs:
     outputs:
       run: ${{ steps.s.outputs.run }}
       publish: ${{ steps.s.outputs.publish }}
+      composition: ${{ steps.s.outputs.composition }}
+      caption: ${{ steps.s.outputs.caption }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,14 +58,17 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm ci
       - name: Рендер видео (Remotion)
-        run: npx remotion render src/index.ts Password out/reel.mp4 --codec=h264 --log=warn
+        env:
+          COMPOSITION: ${{ needs.plan.outputs.composition }}
+        run: npx remotion render src/index.ts "$COMPOSITION" out/reel.mp4 --codec=h264 --log=warn
       - name: Проверка видео
         run: python tools/ci_state.py verify out/reel.mp4
       - name: Проверка описания (без публикации)
         env:
           IG_USER_ID: "0"
           IG_ACCESS_TOKEN: "dry-run"
-        run: python tools/publish_instagram.py publish --video out/reel.mp4 --caption-file content/caption.txt --dry-run
+          CAPTION_FILE: ${{ needs.plan.outputs.caption }}
+        run: python tools/publish_instagram.py publish --video out/reel.mp4 --caption-file "$CAPTION_FILE" --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: reel
@@ -98,9 +103,10 @@ jobs:
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          CAPTION_FILE: ${{ needs.plan.outputs.caption }}
         run: |
           python -u tools/publish_instagram.py check
-          python -u tools/publish_instagram.py publish --video out/reel.mp4 --caption-file content/caption.txt --yes | tee publish.log
+          python -u tools/publish_instagram.py publish --video out/reel.mp4 --caption-file "$CAPTION_FILE" --yes | tee publish.log
       - name: Отметить ролик опубликованным
         if: always() && steps.publish.outcome == 'success'
         run: |
