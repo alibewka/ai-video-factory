@@ -1,0 +1,10 @@
+.env
+node_modules
+out
+.DS_Store
+queue
+.env.*
+*.bak*
+__pycache__
+/*.mp4
+caption.txt

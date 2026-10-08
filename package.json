@@ -1,0 +1,26 @@
+{
+  "name": "password-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion render src/index.ts Password out/password.mp4",
+    "still": "remotion still src/index.ts Password out/frame.png --frame=60",
+    "ig:check": "node tools/publish-instagram.mjs check",
+    "ig:publish": "node tools/publish-instagram.mjs publish",
+    "ig:refresh": "node tools/publish-instagram.mjs refresh"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/montserrat": "^5.3.0",
+    "@remotion/cli": "4.0.250",
+    "@remotion/transitions": "4.0.250",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.250"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.3",
+    "typescript": "5.5.4"
+  }
+}
