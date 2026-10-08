@@ -6,7 +6,7 @@
 
     python tools/publish_instagram.py check
     python tools/publish_instagram.py publish --video out/reel.mp4 --caption-file content/caption.txt [--dry-run] [--yes]
-    python tools/publish_instagram.py refresh
+    python tools/publish_instagram.py refresh [--github-secret IG_ACCESS_TOKEN]
 
 Instagram принимает Reels только по публичной ссылке, поэтому скрипт поднимает локальный
 сервер и открывает временный туннель Cloudflare (нужен cloudflared) либо берёт готовую ссылку (--video-url).
@@ -278,7 +278,26 @@ def cmd_check(api: Instagram) -> None:
     print("  Доступ к публикации Reels проверится при первой публикации.")
 
 
-def cmd_refresh(api: Instagram) -> None:
+def store_github_secret(name: str, value: str) -> None:
+    """Записывает значение в секрет репозитория через gh (в CI нужен ключ с правом Secrets: write)."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+        die(f"Недопустимое имя секрета: {name!r}")
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::add-mask::{value}")  # страховка: скрыть значение в журнале Actions
+    try:
+        result = subprocess.run(["gh", "secret", "set", name], input=value, text=True,
+                                capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        die(f"Не удалось запустить gh ({type(exc).__name__}). Секрет не изменён, старый токен работает.")
+    if result.returncode != 0:
+        detail = (result.stderr or "").replace(value, "***").strip()[:300]
+        die(f"GitHub не принял новое значение секрета {name}: {detail} Старый токен продолжает работать.")
+
+
+def cmd_refresh(api: Instagram, github_secret: str | None = None) -> None:
+    if github_secret and os.environ.get("GITHUB_ACTIONS") and not os.environ.get("GH_TOKEN"):
+        die("Нет GH_TOKEN: добавь секрет GH_SECRETS_PAT (ключ с правом Secrets: read and write). "
+            "Токен не продлевался.")
     data = api.request("GET", REFRESH_URL, params={"grant_type": "ig_refresh_token", "access_token": api.token})
     new_token = data.get("access_token")
     if not new_token:
@@ -292,6 +311,15 @@ def cmd_refresh(api: Instagram) -> None:
         print(f"✓ Токен продлён и записан в .env. Действует ещё примерно {days} дн.")
     elif new_token.strip() == api.token.strip():
         print(f"✓ Токен продлён ещё на ~{days} дн. Значение токена не изменилось, секрет обновлять не нужно.")
+    elif github_secret:
+        probe = Instagram(new_token, api.user_id)  # сначала убеждаемся, что новый токен работает и умеет публиковать
+        try:
+            probe.get("me", fields="username")
+            probe.get(f"{api.user_id}/content_publishing_limit", fields="quota_usage,config")
+        except IGError as exc:
+            die(f"Новый токен не прошёл проверку ({exc}). Секрет не меняю, старый токен продолжает работать.")
+        store_github_secret(github_secret, new_token)
+        print(f"✓ Токен продлён, новое значение записано в секрет {github_secret}. Действует ещё ~{days} дн.")
     else:
         print(f"  Длина старого токена: {len(api.token)}, нового: {len(new_token)} (сами значения не печатаю).")
         die("Токен продлён, но получил новое значение, а сохранить его некуда (файла .env нет). "
@@ -399,7 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Публикация Reels в Instagram")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check", help="проверить токен и аккаунт")
-    sub.add_parser("refresh", help="продлить токен")
+    refresh = sub.add_parser("refresh", help="продлить токен")
+    refresh.add_argument("--github-secret", metavar="ИМЯ",
+                         help="записать новый токен в секрет репозитория GitHub (нужен gh и ключ с правом Secrets: write)")
     publish = sub.add_parser("publish", help="опубликовать Reel")
     publish.add_argument("--video", required=True, help="путь к .mp4")
     group = publish.add_mutually_exclusive_group(required=True)
@@ -429,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "publish":
             cmd_publish(api, args)
         else:
-            cmd_refresh(api)
+            cmd_refresh(api, args.github_secret)
     except IGError as exc:
         die(str(exc))
     return 0

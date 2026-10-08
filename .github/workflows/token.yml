@@ -1,9 +1,10 @@
 name: Токен Instagram — проверить и продлить
 
-# Долгоживущий токен Instagram действует около 60 дней. Этот workflow проверяет доступ,
-# продлевает токен и проверяет доступ ещё раз (старый токен должен продолжать работать).
-# Сначала запусти вручную (Run workflow). Расписание включим, когда будет понятно,
-# что Meta возвращает при продлении.
+# Долгоживущий токен Instagram действует около 60 дней. Meta при продлении выдаёт НОВЫЙ токен,
+# поэтому workflow проверяет новый токен и записывает его в секрет IG_ACCESS_TOKEN.
+# Для записи нужен секрет GH_SECRETS_PAT: ключ GitHub с правом Secrets: read and write
+# только на этот репозиторий (обычный токен workflow менять секреты не может).
+# Продлевать можно не чаще раза в сутки. Сначала запусти вручную, расписание включим после.
 
 on:
   workflow_dispatch:
@@ -29,9 +30,12 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Проверка доступа до продления
         run: python -u tools/publish_instagram.py check
-      - name: Продлить токен
+      - name: Продлить токен и записать новый в секрет
         id: refresh
-        run: python -u tools/publish_instagram.py refresh
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: python -u tools/publish_instagram.py refresh --github-secret IG_ACCESS_TOKEN
       - name: Проверка доступа после продления
         if: always() && steps.refresh.conclusion != 'skipped'
         run: python -u tools/publish_instagram.py check

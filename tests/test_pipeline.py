@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -29,10 +30,11 @@ class FakeGraph:
     """Поддельный Instagram Graph API: запоминает запросы и отвечает как настоящий."""
 
     def __init__(self, polls_before_finished: int = 2, auth_error: bool = False,
-                 refresh_token: str | None = None) -> None:
+                 refresh_token: str | None = None, reject_token: str | None = None) -> None:
         self.polls_before_finished = polls_before_finished
         self.auth_error = auth_error
         self.refresh_token = refresh_token
+        self.reject_token = reject_token
         self.calls: list[tuple[str, str, dict]] = []
         self.polled = 0
         fake = self
@@ -58,6 +60,8 @@ class FakeGraph:
                 parts = url.path.split("/", 2)
                 path = parts[2] if len(parts) > 2 else parts[1]
                 fake.calls.append((method, path, params))
+                if fake.reject_token and params.get("access_token") == fake.reject_token:
+                    return self.reply(400, {"error": {"message": "Invalid OAuth access token", "code": 190}})
                 if fake.auth_error:
                     message = f"Invalid OAuth access token {params.get('access_token')}"
                     return self.reply(400, {"error": {"message": message, "code": 190}})
@@ -319,6 +323,48 @@ class RefreshTests(unittest.TestCase):
         self.assertNotIn("NEW-TOKEN-999", out + err)
         self.assertIn("Длина", out)
         self.assertNotIn(TOKEN, out + err)
+
+    def store(self, fake: FakeGraph, *, result: subprocess.CompletedProcess | None = None,
+              secret: str = "IG_ACCESS_TOKEN") -> tuple[int, str, str, mock.MagicMock]:
+        self.addCleanup(fake.close)
+        done = result or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        env = {"GH_TOKEN": "pat", "GITHUB_ACTIONS": ""}
+        with mock.patch.dict(os.environ, env), mock.patch.object(ig, "ENV_PATH", self.no_env), \
+                mock.patch.object(ig, "REFRESH_URL", fake.root + "/refresh_access_token"), \
+                mock.patch.object(ig.subprocess, "run", return_value=done) as run:
+            code, out, err = run_cli(fake.base, "refresh", "--github-secret", secret)
+        return code, out, err, run
+
+    def test_new_token_is_checked_then_stored_in_github_secret(self) -> None:
+        fake = FakeGraph(refresh_token="NEW-TOKEN-999")
+        code, out, err, run = self.store(fake)
+        self.assertEqual(code, 0)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["gh", "secret", "set", "IG_ACCESS_TOKEN"])
+        self.assertEqual(kwargs["input"], "NEW-TOKEN-999")
+        self.assertNotIn("NEW-TOKEN-999", out + err)
+        probes = [p for p in fake.called("GET", "me") if p.get("access_token") == "NEW-TOKEN-999"]
+        self.assertTrue(probes, "новый токен должен быть проверен до записи")
+
+    def test_broken_new_token_leaves_secret_untouched(self) -> None:
+        fake = FakeGraph(refresh_token="NEW-TOKEN-999", reject_token="NEW-TOKEN-999")
+        code, out, err, run = self.store(fake)
+        self.assertNotEqual(code, 0)
+        run.assert_not_called()
+        self.assertIn("не прошёл проверку", err)
+        self.assertNotIn("NEW-TOKEN-999", out + err)
+
+    def test_github_refusal_does_not_leak_token(self) -> None:
+        refused = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="HTTP 403 NEW-TOKEN-999")
+        code, out, err, _ = self.store(FakeGraph(refresh_token="NEW-TOKEN-999"), result=refused)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("NEW-TOKEN-999", out + err)
+        self.assertIn("***", err)
+
+    def test_bad_secret_name_is_rejected(self) -> None:
+        code, _, err, run = self.store(FakeGraph(refresh_token="NEW-TOKEN-999"), secret="--repo")
+        self.assertNotEqual(code, 0)
+        run.assert_not_called()
 
 
 class EpisodeTests(unittest.TestCase):
