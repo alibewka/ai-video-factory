@@ -106,9 +106,9 @@ class FakeGraph:
         return [params for m, p, params in self.calls if (m, p) == (method, path)]
 
 
-def run_cli(base: str, *argv: str) -> tuple[int, str, str]:
+def run_cli(base: str, *argv: str, token: str = TOKEN) -> tuple[int, str, str]:
     env = {
-        "IG_ACCESS_TOKEN": TOKEN,
+        "IG_ACCESS_TOKEN": token,
         "IG_USER_ID": "42",
         "IG_GRAPH_BASE": base,
         "IG_POLL_INTERVAL": "0",
@@ -296,11 +296,11 @@ class RefreshTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.no_env = Path(tmp.name) / "missing.env"  # настоящий .env тестами не трогаем
 
-    def refresh(self, fake: FakeGraph) -> tuple[int, str, str]:
+    def refresh(self, fake: FakeGraph, token: str = TOKEN) -> tuple[int, str, str]:
         self.addCleanup(fake.close)
         with mock.patch.object(ig, "ENV_PATH", self.no_env), \
                 mock.patch.object(ig, "REFRESH_URL", fake.root + "/refresh_access_token"):
-            return run_cli(fake.base, "refresh")
+            return run_cli(fake.base, "refresh", token=token)
 
     def test_same_token_is_extended(self) -> None:
         code, out, err = self.refresh(FakeGraph())
@@ -308,10 +308,16 @@ class RefreshTests(unittest.TestCase):
         self.assertIn("не изменилось", out)
         self.assertNotIn(TOKEN, out + err)
 
+    def test_whitespace_in_secret_is_not_a_new_token(self) -> None:
+        code, out, _ = self.refresh(FakeGraph(refresh_token=TOKEN), token=TOKEN + "\n")
+        self.assertEqual(code, 0)
+        self.assertIn("не изменилось", out)
+
     def test_new_token_without_env_fails_and_is_never_printed(self) -> None:
         code, out, err = self.refresh(FakeGraph(refresh_token="NEW-TOKEN-999"))
         self.assertNotEqual(code, 0)
         self.assertNotIn("NEW-TOKEN-999", out + err)
+        self.assertIn("Длина", out)
         self.assertNotIn(TOKEN, out + err)
 
 

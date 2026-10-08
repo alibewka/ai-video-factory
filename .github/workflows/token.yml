@@ -1,9 +1,9 @@
 name: Токен Instagram — проверить и продлить
 
-# Долгоживущий токен Instagram действует около 60 дней. Этот workflow продлевает его
-# и проверяет, что доступ к аккаунту работает.
-# Сначала запусти вручную (Run workflow). Если в журнале написано, что значение токена
-# не изменилось, раскомментируй расписание ниже.
+# Долгоживущий токен Instagram действует около 60 дней. Этот workflow проверяет доступ,
+# продлевает токен и проверяет доступ ещё раз (старый токен должен продолжать работать).
+# Сначала запусти вручную (Run workflow). Расписание включим, когда будет понятно,
+# что Meta возвращает при продлении.
 
 on:
   workflow_dispatch:
@@ -17,6 +17,9 @@ jobs:
   refresh:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,10 +27,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Продлить токен и проверить доступ
-        env:
-          IG_USER_ID: ${{ secrets.IG_USER_ID }}
-          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
-        run: |
-          python -u tools/publish_instagram.py refresh
-          python -u tools/publish_instagram.py check
+      - name: Проверка доступа до продления
+        run: python -u tools/publish_instagram.py check
+      - name: Продлить токен
+        id: refresh
+        run: python -u tools/publish_instagram.py refresh
+      - name: Проверка доступа после продления
+        if: always() && steps.refresh.conclusion != 'skipped'
+        run: python -u tools/publish_instagram.py check
