@@ -1,6 +1,9 @@
 {
   "id": "agents-klarna",
-  "status": "pending",
+  "status": "posted",
   "video": "content/videos/agents.mp4",
-  "caption": "content/captions/agents.txt"
+  "caption": "content/captions/agents.txt",
+  "permalink": "https://www.instagram.com/reel/DeU_InRDpxP/",
+  "mediaId": "18131364760785093",
+  "postedAt": "2026-10-10T20:53:31+00:00"
 }
