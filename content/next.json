@@ -1,6 +1,6 @@
 {
   "id": "agent-chat",
-  "status": "pending",
+  "status": "hold",
   "video": "content/videos/agent-chat.mp4",
   "caption": "content/captions/agent-chat.txt"
 }
